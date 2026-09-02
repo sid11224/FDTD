@@ -29,7 +29,8 @@ typedef enum
     CONF_BOUNDARY,
     CONF_MATERIAL,
     CONF_REGION,
-    CONF_SOURCE
+    CONF_SOURCE,
+    CONF_ANALYZER
 } section_t;
 
 static char *trim(char *str)
@@ -107,6 +108,12 @@ int read_config(char *path, config_t *config)
                 section = CONF_SOURCE;
                 config->num_sources++;
                 config->sources = realloc(config->sources, config->num_sources * sizeof(source_config_t));
+            }
+            else if (strcmp(line + 1, "analyzer") == 0)
+            {
+                section = CONF_ANALYZER;
+                config->num_analyzers++;
+                config->analyzers = realloc(config->analyzers, config->num_analyzers * sizeof(analysis_config_t));
             }
             continue;
         }
@@ -240,6 +247,29 @@ int read_config(char *path, config_t *config)
             }
             break;
         }
+        case CONF_ANALYZER: {
+            if (strcmp(key, "file") == 0)
+            {
+                config->analyzers[config->num_analyzers - 1].c_path = strdup(value);
+            }
+            else if (strcmp(key, "init") == 0)
+            {
+                config->analyzers[config->num_analyzers - 1].init_func = strdup(value);
+            }
+            else if (strcmp(key, "process") == 0)
+            {
+                config->analyzers[config->num_analyzers - 1].process_func = strdup(value);
+            }
+            else if (strcmp(key, "finish") == 0)
+            {
+                config->analyzers[config->num_analyzers - 1].finish_func = strdup(value);
+            }
+            else
+            {
+                LOG_WARN("Unrecognised key %s", key);
+            }
+            break;
+        }
         default:
             break;
         }
@@ -292,6 +322,21 @@ void delete_config(config_t *config)
 
         config->num_sources = 0;
         config->sources = NULL;
+    }
+
+    if (config->analyzers != NULL)
+    {
+        for (uint32_t i = 0; i < config->num_analyzers; ++i)
+        {
+            free(config->analyzers[i].c_path);
+            free(config->analyzers[i].init_func);
+            free(config->analyzers[i].process_func);
+            free(config->analyzers[i].finish_func);
+        }
+        free(config->analyzers);
+
+        config->num_analyzers = 0;
+        config->analyzers = NULL;
     }
 }
 
@@ -433,6 +478,24 @@ int validate_sources(const config_t *config)
     return 0;
 }
 
+int validate_analyzers(const config_t *config)
+{
+    if (config->num_analyzers < 1)
+        return 0;
+
+    for (int i = 0; i < config->num_analyzers; ++i)
+    {
+        const char *c_file = config->analyzers[i].c_path;
+        if (!c_file || access(c_file, F_OK) != 0)
+        {
+            LOG_ERROR("Source file does not exist or is unreadable: '%s'", c_file ? c_file : "NULL");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int validate_config(const config_t *config)
 {
     LOG_INFO("Validating config...");
@@ -446,6 +509,9 @@ int validate_config(const config_t *config)
         return -1;
 
     if (validate_sources(config) != 0)
+        return -1;
+
+    if (validate_analyzers(config) != 0)
         return -1;
 
     return 0;

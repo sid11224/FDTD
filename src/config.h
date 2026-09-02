@@ -1,5 +1,6 @@
 #pragma once
 
+#include "analysis_interface.h"
 #include <stdint.h>
 
 typedef struct
@@ -53,6 +54,14 @@ typedef struct
 
 typedef struct
 {
+    char *c_path;
+    char *init_func;
+    char *process_func;
+    char *finish_func;
+} analysis_config_t;
+
+typedef struct
+{
     sim_config_t sim_config;
     boundary_config_t boundary;
 
@@ -64,6 +73,9 @@ typedef struct
 
     uint32_t num_sources;
     source_config_t *sources;
+
+    uint32_t num_analyzers;
+    analysis_config_t *analyzers;
 } config_t;
 
 int read_config(char *path, config_t *config);

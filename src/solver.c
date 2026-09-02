@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "analysis_interface.h"
+#include "analyzer.h"
 #include "config.h"
 #include "log.h"
 #include "mesh.h"
@@ -123,7 +125,7 @@ static void solve_step(field_t *field, const mesh_t *mesh, const boundary_config
     }
 }
 
-void apply_source(field_t *field, const source_t *src, source_context_t src_ctx)
+void apply_source(field_t *field, const source_t *src, const source_context_t *src_ctx)
 {
     double value = src->func(src_ctx);
     if (fabs(value) < 2e-3)
@@ -163,66 +165,65 @@ void run_solver(field_t *field, const mesh_t *mesh, const config_t *config)
         load_and_compile_source(config->sources[i], &srcs[i]);
     }
 
+    uint32_t num_analyzers = config->num_analyzers;
+    analyzer_t *analyzers = (analyzer_t *)malloc(num_analyzers * sizeof(analyzer_t));
+
+    LOG_INFO("Compiling analyzers...");
+
+    for (uint32_t i = 0; i < num_analyzers; ++i)
+    {
+        load_and_compile_analyzer(config->analyzers[i], &analyzers[i]);
+        analyzers[i].user_data = analyzers[i].init();
+    }
+
     LOG_INFO("Running simulation for %u timesteps", steps);
 
     double dt = mesh->dt;
 
-    FILE *gp = popen("gnuplot -persist", "w");
+    source_context_t src_ctx;
+    src_ctx.dt = dt;
 
-    if (!gp)
-    {
-        perror("gnuplot");
-    }
-
-    fprintf(gp, "set xrange [%f:%f]\n", -3.0, 3.0);
-    fprintf(gp, "set ytics nomirror\n");
-    fprintf(gp, "set yrange [%f:%f]\n", -1.5, 1.5);
-    fprintf(gp, "set grid\n");
-    fprintf(gp, "set term qt 0\n");
-
-    fflush(gp);
+    analysis_context_t analysis_ctx;
+    analysis_ctx.dt = dt;
+    analysis_ctx.N = mesh->N;
+    analysis_ctx.dz = mesh->dz;
+    analysis_ctx.Ex = field->Ex;
+    analysis_ctx.Ey = field->Ey;
+    analysis_ctx.Hx = field->Hx;
+    analysis_ctx.Hy = field->Hy;
 
     for (uint32_t i = 0; i < steps; ++i)
     {
         double t = i * dt;
 
-        source_context_t ctx = {t, dt};
+        src_ctx.t = t;
+        analysis_ctx.t = t;
+        analysis_ctx.current_step = i;
 
         for (int j = 0; j < num_srcs; ++j)
         {
-            apply_source(field, &srcs[j], ctx);
+            apply_source(field, &srcs[j], &src_ctx);
+        }
+
+        for (uint32_t j = 0; j < num_analyzers; ++j)
+        {
+            analysis_ctx.user_data = analyzers[j].user_data;
+            analyzers[j].process(&analysis_ctx);
         }
 
         solve_step(field, mesh, &boundary);
+    }
 
-        fprintf(gp, "$Ey << EOD\n");
-        for (int i = 0; i < mesh->N + 1; ++i)
-        {
-            double x = i * mesh->dz - 3.0;
-            double y = field->Ey[i];
-
-            fprintf(gp, "%e %e\n", x, y);
-        }
-        fprintf(gp, "EOD\n");
-        fprintf(gp, "$Ex << EOD\n");
-        for (int i = 0; i < mesh->N + 1; ++i)
-        {
-            double x = i * mesh->dz - 3.0;
-            double y = field->Ex[i];
-
-            fprintf(gp, "%e %e\n", x, y);
-        }
-        fprintf(gp, "EOD\n");
-        fprintf(gp, "plot $Ey u 1:2 axes x1y1 w l smooth unique t 'Ey', \
-						$Ex u 1:2 axes x1y1 w l smooth unique t 'Ex'\n");
-
-        usleep(5000);
+    for (uint32_t j = 0; j < num_analyzers; ++j)
+    {
+        analysis_ctx.user_data = analyzers[j].user_data;
+        analyzers[j].finish(&analysis_ctx);
+        free_analyzer(&analyzers[j]);
     }
 
     for (int i = 0; i < config->num_sources; ++i)
         free_source(&srcs[i]);
 
     free(srcs);
-
-    pclose(gp);
+    free(analyzers);
 }
