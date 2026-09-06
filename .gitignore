@@ -1,4 +1,5 @@
-compile_commands.json
+report/
 
+compile_commands.json
 *.so
 *.out
