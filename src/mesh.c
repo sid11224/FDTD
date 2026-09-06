@@ -48,7 +48,7 @@ int create_mesh(const config_t *config, mesh_t *mesh)
             return -1;
         }
 
-        for (uint32_t i = region->start; i <= region->end; ++i)
+        for (uint32_t i = region->start; i < region->end; ++i)
         {
             mesh->eps[i] = material->eps_r * eps0;
             mesh->mu[i] = material->mu_r * mu0;
